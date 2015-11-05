@@ -98,7 +98,6 @@ struct {
     #endif
     int loglevel;
     int loglevels[BLOG_NUM_CHANNELS];
-    char *tundev;
     char *netif_ipaddr;
     char *netif_netmask;
     char *netif_ip6addr;
@@ -111,6 +110,13 @@ struct {
     int udpgw_max_connections;
     int udpgw_connection_buffer_size;
     int udpgw_transparent_dns;
+#ifdef ANDROID
+    int tun_fd;
+    int tun_mtu;
+    char *pid;
+#else
+    char *tundev;
+#endif
 } options;
 
 // TCP client
@@ -238,6 +244,57 @@ static int client_socks_recv_send_out (struct tcp_client *client);
 static err_t client_sent_func (void *arg, struct tcp_pcb *tpcb, u16_t len);
 static void udpgw_client_handler_received (void *unused, BAddr local_addr, BAddr remote_addr, const uint8_t *data, int data_len);
 
+#ifdef ANDROID
+static void daemonize(const char* path) {
+
+    /* Our process ID and Session ID */
+    pid_t pid, sid;
+
+    /* Fork off the parent process */
+    pid = fork();
+    if (pid < 0) {
+        exit(EXIT_FAILURE);
+    }
+
+    /* If we got a good PID, then
+       we can exit the parent process. */
+    if (pid > 0) {
+        FILE *file = fopen(path, "w");
+        if (file == NULL) {
+            BLog(BLOG_ERROR, "Invalid pid file");
+            exit(EXIT_FAILURE);
+        }
+
+        fprintf(file, "%d", pid);
+        fclose(file);
+        exit(EXIT_SUCCESS);
+    }
+
+    /* Change the file mode mask */
+    umask(0);
+
+    /* Open any logs here */        
+
+    /* Create a new SID for the child process */
+    sid = setsid();
+    if (sid < 0) {
+        /* Log the failure */
+        exit(EXIT_FAILURE);
+    }
+
+    /* Change the current working directory */
+    if ((chdir("/")) < 0) {
+        /* Log the failure */
+        exit(EXIT_FAILURE);
+    }
+
+    /* Close out the standard file descriptors */
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+}
+#endif
+
 int main (int argc, char **argv)
 {
     if (argc <= 0) {
@@ -264,6 +321,12 @@ int main (int argc, char **argv)
         print_version();
         return 0;
     }
+
+#ifdef ANDROID
+    if (options.pid) {
+        daemonize(options.pid);
+    }
+#endif
     
     // initialize logger
     switch (options.logger) {
@@ -327,11 +390,19 @@ int main (int argc, char **argv)
         goto fail2;
     }
     
+#ifdef ANDROID
+    // use supplied file descriptor
+    if (!BTap_InitWithFD(&device, &ss, options.tun_fd, options.tun_mtu, device_error_handler, NULL, 1)) {
+        BLog(BLOG_ERROR, "BTap_InitWithFD failed");
+        goto fail3;
+    }
+#else
     // init TUN device
     if (!BTap_Init(&device, &ss, options.tundev, device_error_handler, NULL, 1)) {
         BLog(BLOG_ERROR, "BTap_Init failed");
         goto fail3;
     }
+#endif
     
     // NOTE: the order of the following is important:
     // first device writing must evaluate,
@@ -482,7 +553,13 @@ void print_help (const char *name)
         #endif
         "        [--loglevel <0-5/none/error/warning/notice/info/debug>]\n"
         "        [--channel-loglevel <channel-name> <0-5/none/error/warning/notice/info/debug>] ...\n"
+#ifdef ANDROID
+        "        [--tunfd <fd>]\n"
+        "        [--tunmtu <mtu>]\n"
+        "        [--pid <pid_file>]\n"
+#else
         "        [--tundev <name>]\n"
+#endif
         "        --netif-ipaddr <ipaddr>\n"
         "        --netif-netmask <ipnetmask>\n"
         "        --socks-server-addr <addr>\n"
@@ -522,7 +599,13 @@ int parse_arguments (int argc, char *argv[])
     for (int i = 0; i < BLOG_NUM_CHANNELS; i++) {
         options.loglevels[i] = -1;
     }
+#ifdef ANDROID
+    options.tun_fd = -1;
+    options.tun_mtu = 1500;
+    options.pid = NULL;
+#else
     options.tundev = NULL;
+#endif
     options.netif_ipaddr = NULL;
     options.netif_netmask = NULL;
     options.netif_ip6addr = NULL;
@@ -612,6 +695,38 @@ int parse_arguments (int argc, char *argv[])
             options.loglevels[channel] = loglevel;
             i += 2;
         }
+#ifdef ANDROID
+        else if (!strcmp(arg, "--tunfd")) {
+            if (1 >= argc - i) {
+                fprintf(stderr, "%s: requires an argument\n", arg);
+                return 0;
+            }
+            if ((options.tun_fd = atoi(argv[i + 1])) <= 0) {
+                fprintf(stderr, "%s: wrong argument\n", arg);
+                return 0;
+            }
+            i++;
+        }
+        else if (!strcmp(arg, "--tunmtu")) {
+            if (1 >= argc - i) {
+                fprintf(stderr, "%s: requires an argument\n", arg);
+                return 0;
+            }
+            if ((options.tun_mtu = atoi(argv[i + 1])) <= 0) {
+                fprintf(stderr, "%s: wrong argument\n", arg);
+                return 0;
+            }
+            i++;
+        }
+        else if (!strcmp(arg, "--pid")) {
+            if (1 >= argc - i) {
+                fprintf(stderr, "%s: requires an argument\n", arg);
+                return 0;
+            }
+            options.pid = argv[i + 1];
+            i++;
+        }
+#else
         else if (!strcmp(arg, "--tundev")) {
             if (1 >= argc - i) {
                 fprintf(stderr, "%s: requires an argument\n", arg);
@@ -620,6 +735,7 @@ int parse_arguments (int argc, char *argv[])
             options.tundev = argv[i + 1];
             i++;
         }
+#endif
         else if (!strcmp(arg, "--netif-ipaddr")) {
             if (1 >= argc - i) {
                 fprintf(stderr, "%s: requires an argument\n", arg);
