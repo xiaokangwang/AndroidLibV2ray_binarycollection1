@@ -343,7 +343,7 @@ static void udpgw_client_handler_received (void *unused, BAddr local_addr, BAddr
 static void daemonize(const char* path) {
 
     /* Our process ID and Session ID */
-    pid_t pid;
+    pid_t pid, sid;
 
     /* Fork off the parent process */
     pid = fork();
@@ -363,6 +363,24 @@ static void daemonize(const char* path) {
         fprintf(file, "%d", pid);
         fclose(file);
         exit(EXIT_SUCCESS);
+    }
+
+    /* Change the file mode mask */
+    umask(0);
+
+    /* Open any logs here */
+
+    /* Create a new SID for the child process */
+    sid = setsid();
+    if (sid < 0) {
+        /* Log the failure */
+        exit(EXIT_FAILURE);
+    }
+
+    /* Change the current working directory */
+    if ((chdir("/")) < 0) {
+        /* Log the failure */
+        exit(EXIT_FAILURE);
     }
 
     /* Close out the standard file descriptors */
