@@ -197,6 +197,7 @@ struct {
     int tun_fd;
     int tun_mtu;
     int fake_proc;
+    char *sock_path;
     char *pid;
     char *dnsgw;
 #else
@@ -493,7 +494,7 @@ int main (int argc, char **argv)
 
 #ifdef ANDROID
     // use supplied file descriptor
-    
+
     int sock, fd;
     struct sockaddr_un addr;
 
@@ -503,6 +504,9 @@ int main (int argc, char **argv)
     }
 
     char *path = "/data/data/com.github.shadowsocks/sock_path";
+    if (options.sock_path != NULL) {
+        path = options.sock_path;
+    }
     unlink(path);
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
@@ -524,7 +528,7 @@ int main (int argc, char **argv)
         int sock2;
         struct sockaddr_un remote;
         int t = sizeof(remote);
-        if ((sock2 = accept(sock, (struct sockaddr *)&remote, &t)) == -1) { 
+        if ((sock2 = accept(sock, (struct sockaddr *)&remote, &t)) == -1) {
             BLog(BLOG_ERROR, "accept() failed: %s (sock = %d)\n", strerror(errno), sock);
             continue;
         }
@@ -721,6 +725,7 @@ void print_help (const char *name)
         "        [--tunmtu <mtu>]\n"
         "        [--dnsgw <dns_gateway_address>]\n"
         "        [--pid <pid_file>]\n"
+        "        [--sock-path <sock_path>]\n"
 #else
         "        [--tundev <name>]\n"
 #endif
@@ -773,6 +778,7 @@ int parse_arguments (int argc, char *argv[])
     options.tun_mtu = 1500;
     options.fake_proc = 0;
     options.pid = NULL;
+    options.sock_path = NULL;
 #else
     options.tundev = NULL;
 #endif
@@ -897,6 +903,14 @@ int parse_arguments (int argc, char *argv[])
                 return 0;
             }
             options.dnsgw = argv[i + 1];
+            i++;
+        }
+        else if (!strcmp(arg, "--sock-path")) {
+            if (1 >= argc - i) {
+                fprintf(stderr, "%s: requires an argument\n", arg);
+                return 0;
+            }
+            options.sock_path = argv[i + 1];
             i++;
         }
         else if (!strcmp(arg, "--pid")) {
@@ -1206,13 +1220,13 @@ void lwip_init_job_hadler (void *unused)
 
     // set netif up
     netif_set_up(&the_netif);
-    
+
     // set netif pretend TCP
     netif_set_pretend_tcp(&the_netif, 1);
-    
+
     // set netif default
     netif_set_default(&the_netif);
-    
+
     if (options.netif_ip6addr) {
         // add IPv6 address
         memcpy(netif_ip6_addr(&the_netif, 0), netif_ip6addr.bytes, sizeof(netif_ip6addr.bytes));
