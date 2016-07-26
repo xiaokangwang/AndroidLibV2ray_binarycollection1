@@ -495,7 +495,10 @@ int main (int argc, char **argv)
 #ifdef ANDROID
     // use supplied file descriptor
 
-    int sock, fd;
+    int fd=3;
+    //We will transfer fd with fork, and there is no necessary to receive it anymore
+
+    /*
     struct sockaddr_un addr;
 
     if ((sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
@@ -542,6 +545,7 @@ int main (int argc, char **argv)
         }
     }
     close(sock);
+    */
 
     struct BTap_init_data init_data;
     init_data.dev_type = BTAP_DEV_TUN;
